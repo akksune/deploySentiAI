@@ -26,26 +26,59 @@ import spacy
 from nltk.corpus import stopwords
 
 
-# Run setup_nlp.py once before using this module.
+# ========================================
+# DOWNLOAD NLTK RESOURCES
+# ========================================
+
+NLTK_RESOURCES = [
+    "stopwords",
+    "punkt",
+    "punkt_tab",
+]
+
+for resource in NLTK_RESOURCES:
+    nltk.download(resource, quiet=True)
+
+
+# ========================================
+# LOAD SPACY ENGLISH MODEL
+# ========================================
+
 try:
     NLP = spacy.load("en_core_web_sm")
+
 except OSError as exc:
     raise RuntimeError(
         "spaCy English model is missing. "
-        "Run: python -m spacy download en_core_web_sm"
+        "Make sure en_core_web_sm is installed "
+        "through requirements.txt."
     ) from exc
+
+
+# ========================================
+# LOAD NLTK STOPWORDS
+# ========================================
 
 try:
     STOP_WORDS = set(stopwords.words("english"))
+
 except LookupError as exc:
     raise RuntimeError(
-        "NLTK stopwords are missing. Run: python setup_nlp.py"
+        "NLTK stopwords could not be loaded. "
+        "Check your internet connection and deployment logs."
     ) from exc
 
 
 # Keep meaningful negation words because they can change sentiment.
 # Example: "not good" should not become "good".
-STOP_WORDS.difference_update({"no", "nor", "not", "never", "n't"})
+STOP_WORDS.difference_update({
+    "no",
+    "nor",
+    "not",
+    "never",
+    "n't",
+})
+
 
 WORD_PATTERN = re.compile(
     r"\b[\w]+(?:['’][\w]+)?\b",
@@ -53,20 +86,28 @@ WORD_PATTERN = re.compile(
 )
 
 
+# ========================================
+# PDF TEXT EXTRACTION
+# ========================================
+
 def extract_text_from_pdf(pdf_path: str | Path) -> str:
     """Extract selectable text from every page of a PDF."""
 
     path = Path(pdf_path)
 
     if not path.exists():
-        raise FileNotFoundError(f"PDF file not found: {path}")
+        raise FileNotFoundError(
+            f"PDF file not found: {path}"
+        )
 
     pages: list[str] = []
 
     with fitz.open(path) as document:
 
         if document.is_encrypted:
-            raise ValueError("The PDF is password-protected.")
+            raise ValueError(
+                "The PDF is password-protected."
+            )
 
         for page in document:
             page_text = page.get_text("text")
@@ -78,12 +119,16 @@ def extract_text_from_pdf(pdf_path: str | Path) -> str:
 
     if not extracted:
         raise ValueError(
-            "No selectable text was found. The PDF may contain scanned "
-            "images; OCR would be needed to read it."
+            "No selectable text was found. The PDF may contain "
+            "scanned images; OCR would be needed to read it."
         )
 
     return extracted
 
+
+# ========================================
+# TEXT CLEANING
+# ========================================
 
 def clean_text(text: str) -> str:
     """
@@ -93,18 +138,27 @@ def clean_text(text: str) -> str:
     """
 
     if not isinstance(text, str):
-        raise TypeError("Text input must be a string.")
+        raise TypeError(
+            "Text input must be a string."
+        )
 
     cleaned = text.lower()
 
+    # Remove URLs.
     cleaned = re.sub(
         r"https?://\S+|www\.\S+",
         " ",
         cleaned
     )
 
-    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    # Remove HTML-like tags.
+    cleaned = re.sub(
+        r"<[^>]+>",
+        " ",
+        cleaned
+    )
 
+    # Remove punctuation.
     cleaned = re.sub(
         r"[^\w\s'’]",
         " ",
@@ -112,11 +166,26 @@ def clean_text(text: str) -> str:
         flags=re.UNICODE
     )
 
-    cleaned = re.sub(r"[_\d]+", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    # Remove underscores and digits.
+    cleaned = re.sub(
+        r"[_\d]+",
+        " ",
+        cleaned
+    )
+
+    # Normalize whitespace.
+    cleaned = re.sub(
+        r"\s+",
+        " ",
+        cleaned
+    ).strip()
 
     return cleaned
 
+
+# ========================================
+# TEXT SUMMARIZATION
+# ========================================
 
 def generate_summary(
     sentences: list[str],
@@ -139,7 +208,9 @@ def generate_summary(
     frequencies = Counter(processed_tokens)
 
     if not frequencies:
-        return " ".join(sentences[:max_sentences])
+        return " ".join(
+            sentences[:max_sentences]
+        )
 
     sentence_scores = []
 
@@ -165,7 +236,9 @@ def generate_summary(
         else:
             score = 0
 
-        sentence_scores.append((index, score, sentence))
+        sentence_scores.append(
+            (index, score, sentence)
+        )
 
     # Select the highest-scoring sentences.
     selected = sorted(
@@ -175,12 +248,19 @@ def generate_summary(
     )[:max_sentences]
 
     # Restore the original sentence order.
-    selected.sort(key=lambda item: item[0])
-
-    return " ".join(
-        sentence for _, _, sentence in selected
+    selected.sort(
+        key=lambda item: item[0]
     )
 
+    return " ".join(
+        sentence
+        for _, _, sentence in selected
+    )
+
+
+# ========================================
+# MAIN TEXT PREPROCESSING
+# ========================================
 
 def preprocess_text(text: str) -> dict[str, Any]:
     """
@@ -195,8 +275,11 @@ def preprocess_text(text: str) -> dict[str, Any]:
     """
 
     if not isinstance(text, str) or not text.strip():
-        raise ValueError("Please provide non-empty text.")
+        raise ValueError(
+            "Please provide non-empty text."
+        )
 
+    # Process original text.
     doc = NLP(text)
 
     # Count words from the original text.
@@ -224,7 +307,10 @@ def preprocess_text(text: str) -> dict[str, Any]:
     normalized = clean_text(text)
     normalized_doc = NLP(normalized)
 
-    # Lemmatized tokens for frequency analysis and classification.
+    # ========================================
+    # LEMMATIZED TOKENS
+    # ========================================
+
     processed_tokens: list[str] = []
 
     for token in normalized_doc:
@@ -239,17 +325,27 @@ def preprocess_text(text: str) -> dict[str, Any]:
         ):
             processed_tokens.append(lemma)
 
-    # Frequent words.
+    # ========================================
+    # FREQUENT WORDS
+    # ========================================
+
     frequencies = Counter(processed_tokens)
 
     frequent_words = [
-        {"word": word, "count": count}
+        {
+            "word": word,
+            "count": count
+        }
         for word, count in frequencies.most_common(10)
     ]
 
-    # Extract noun phrases and named entities as candidate keywords.
+    # ========================================
+    # KEYWORD EXTRACTION
+    # ========================================
+
     candidates: Counter[str] = Counter()
 
+    # Extract noun phrases.
     for chunk in doc.noun_chunks:
 
         phrase_words = [
@@ -261,11 +357,14 @@ def preprocess_text(text: str) -> dict[str, Any]:
             )
         ]
 
-        phrase = " ".join(phrase_words).strip()
+        phrase = " ".join(
+            phrase_words
+        ).strip()
 
         if phrase and len(phrase) > 2:
             candidates[phrase] += 1
 
+    # Extract named entities.
     for entity in doc.ents:
 
         entity_text = entity.text.strip()
@@ -278,7 +377,9 @@ def preprocess_text(text: str) -> dict[str, Any]:
                 "QUANTITY"
             }
         ):
-            candidates[entity_text.lower()] += 1
+            candidates[
+                entity_text.lower()
+            ] += 1
 
     # Use frequent content words as fallback keywords.
     if not candidates:
@@ -287,18 +388,33 @@ def preprocess_text(text: str) -> dict[str, Any]:
             candidates[word] = count
 
     keywords = [
-        {"keyword": phrase, "count": count}
+        {
+            "keyword": phrase,
+            "count": count
+        }
         for phrase, count in candidates.most_common(10)
     ]
 
-    # Generate the text summary.
+    # ========================================
+    # TEXT SUMMARY
+    # ========================================
+
     summary = generate_summary(
         sentence_list,
         processed_tokens
     )
 
-    # Prepare text for the downstream sentiment classifier.
-    classification_text = " ".join(processed_tokens)
+    # ========================================
+    # SENTIMENT CLASSIFIER PREPARATION
+    # ========================================
+
+    classification_text = " ".join(
+        processed_tokens
+    )
+
+    # ========================================
+    # RETURN RESULTS
+    # ========================================
 
     return {
         "total_words": len(original_words),
@@ -315,6 +431,10 @@ def preprocess_text(text: str) -> dict[str, Any]:
         "sentences": sentence_list,
     }
 
+
+# ========================================
+# PUBLIC FUNCTIONS
+# ========================================
 
 def analyze_text(text: str) -> dict[str, Any]:
     """Public entry point for text input."""
